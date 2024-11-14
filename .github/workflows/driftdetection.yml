@@ -35,7 +35,7 @@ jobs:
 
       - name: 'Terraform plan'
         id: plan
-        run: terraform plan -out=tfplan -detailed-exitcode
+        run: terraform plan -out=tfplan
         working-directory: ${{ env.WORKING_DIR }}
 
       - name: 'Terraform show'
