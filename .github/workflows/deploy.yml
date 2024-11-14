@@ -1,36 +1,133 @@
-# This is a basic workflow to help you get started with Actions
-
-name: CI
-
-# Controls when the workflow will run
+name: 'deploy'
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - '.gitignore'
+      - '*.yml'
+
+permissions:
+  contents: write
+  pull-requests: read
+
+env:
+  WORKING_DIR: 'deployments'
+  GH_TOKEN: ${{ github.token }}
+  WORKSPACE: 'prod'
+
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  validate:
     runs-on: ubuntu-latest
-
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    name: 'validate'
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: 'Checkout'
+        id: checkout
+        uses: actions/checkout@v4.1.7
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: 'Setup Terraform with Azure credentials'
+        id: setup
+        uses: './.github/actions/tfsetup'
+        with:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          WORKSPACE: ${{ env.WORKSPACE }}
+          WORKING_DIR: ${{ env.WORKING_DIR }}
 
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+      - name: 'Terraform validate'
+        id: validate
+        working-directory: ${{ inputs.WORKING_DIR }}
+        run: terraform validate
+
+      - name: 'Terraform fmt'
+        id: fmt
+        working-directory: ${{ inputs.WORKING_DIR }}
+        run: terraform fmt -recursive
+
+      - uses: EndBug/add-and-commit@v9
+        with:
+          add: '*.tf'
+          committer_name: ${{ github.actor }}
+          default_author: github_actions
+          message: 'action: terraform fmt :taco: :champagne: :pizza: [skip ci]'
+          github_token: ${{ github.token }}
+          push: true
+
+  analyse:
+    runs-on: ubuntu-latest
+    name: 'analyse'
+    needs: validate
+    steps:
+      - name: 'Checkout'
+        id: checkout
+        uses: actions/checkout@v4.1.7
+
+      - name: 'Setup Terraform with Azure credentials'
+        id: setup
+        uses: './.github/actions/tfsetup'
+        with:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          WORKSPACE: ${{ env.WORKSPACE }}
+          WORKING_DIR: ${{ env.WORKING_DIR }}
+
+      - name: 'Checkov with severity level'
+        id: checkov
+        uses: './.github/actions/checkovwithseveritylevel'
+        with:
+          WORKING_DIR: ${{ env.WORKING_DIR }}
+          FAIL_ON_LEVEL: 'MEDIUM'
+          SOFT_FAIL: 'true'
+
+      - name: 'Tfsec scan'
+        id: tfsec
+        uses: aquasecurity/tfsec-action@v1.0.3
+        with:
+          additional_args: '--minimum-severity MEDIUM --workspace ${{ env.WORKSPACE }}'
+
+      - name: 'Terraform plan'
+        id: plan
+        run: terraform plan -out=${{ env.WORKSPACE }}.tfplan
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 'Save tfplan'
+        uses: actions/cache/save@v4.1.2
+        with:
+          path: ${{ env.WORKING_DIR }}/${{ env.WORKSPACE }}.tfplan
+          key: tfplan-${{ env.WORKSPACE }}-${{ github.run_number }}-${{ github.run_attempt }}
+
+  apply:
+    needs: analyse
+    runs-on: ubuntu-latest
+    name: 'apply'
+    steps:
+      - name: 'Checkout'
+        id: checkout
+        uses: actions/checkout@v4.1.7
+
+      - name: 'Setup Terraform with Azure credentials'
+        id: setup
+        uses: './.github/actions/tfsetup'
+        with:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          WORKSPACE: ${{ env.WORKSPACE }}
+          WORKING_DIR: ${{ env.WORKING_DIR }}
+
+      - name: Restore cached source
+        uses: actions/cache/restore@v4.1.2
+        with:
+          path: ${{ env.WORKING_DIR }}/${{ env.WORKSPACE }}.tfplan
+          key: tfplan-${{ env.WORKSPACE }}-${{ github.run_number }}-${{ github.run_attempt }}
+
+      - name: 'Terraform apply'
+        id: apply
+        run: terraform apply -auto-approve ${{ env.WORKSPACE }}.tfplan
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 'Invoke deploy to Azure Web App workflow'
+        uses: benc-uk/workflow-dispatch@v1.2.4
+        with:
+          workflow: deploy_web_app
+          inputs: '{ "WORKSPACE": "${{ env.WORKSPACE }}" }'
+          token: '${{ github.token }}'
