@@ -40,8 +40,17 @@ jobs:
 
       - name: 'Terraform show'
         id: show
-        run: echo "plandiff='$(terraform show tfplan | sed $'s/\\[[^m]*m//g; s/[^[:print:]\t]//g')'" >> "$GITHUB_OUTPUT"
+        run: echo "$(terraform show tfplan | sed $'s/\\[[^m]*m//g; s/[^[:print:]\t]//g')" >> plandiff.txt
         working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 'Load plandiff content'
+        id: load_plandiff
+        working-directory: ${{ env.WORKING_DIR }}
+        run: |
+          content=$(cat plandiff.txt)
+          echo "plandiff_content<<EOF" >> $GITHUB_ENV
+          echo "$content" >> $GITHUB_ENV
+          echo "EOF" >> $GITHUB_ENV
 
       - name: 'Create issue with drift details'
         uses: trstringer/manual-approval@v1
@@ -50,5 +59,8 @@ jobs:
           approvers: 'erikbjo'
           minimum-approvals: 1
           issue-title: "Drift detected on ${{ github.env.WORKSPACE }}, see body for details"
-          issue-body: ${{ steps.show.outputs.plandiff }}
+          issue-body: |
+            "´´´text
+            ${{ env.plandiff_content }}
+            ´´´
           exclude-workflow-initiator-as-approver: false
