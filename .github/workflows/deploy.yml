@@ -17,6 +17,7 @@ permissions:
 env:
   WORKING_DIR: 'deployments'
   GH_TOKEN: ${{ github.token }}
+  TF_VAR_subscription_id: ${{ secrets.SUBSCRIPTION_ID }}
   WORKSPACE: 'prod'
 
 jobs:
