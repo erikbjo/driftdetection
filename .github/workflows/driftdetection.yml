@@ -2,11 +2,53 @@ name: 'driftdetection'
 on:
   workflow_dispatch:
 
-  on:
-    schedule:
-      - cron: '*/30 * * * *'
+  schedule:
+    - cron: '*/30 * * * *'
 
 permissions:
   contents: read
   pull-requests: read
   issues: write
+
+env:
+  WORKING_DIR: 'deployments'
+  GH_TOKEN: ${{ github.token }}
+  TF_VAR_subscription_id: ${{ secrets.SUBSCRIPTION_ID }}
+  WORKSPACE: 'prod'
+
+jobs:
+  driftdetection:
+    runs-on: ubuntu-latest
+    name: 'driftdetection'
+    steps:
+      - name: 'Checkout'
+        id: checkout
+        uses: actions/checkout@v4.1.7
+
+      - name: 'Setup Terraform with Azure credentials'
+        id: setup
+        uses: './.github/actions/tfsetup'
+        with:
+          AZURE_CREDENTIALS: ${{ secrets.AZURE_CREDENTIALS }}
+          WORKSPACE: ${{ env.WORKSPACE }}
+          WORKING_DIR: ${{ env.WORKING_DIR }}
+
+      - name: 'Terraform plan'
+        id: plan
+        run: terraform plan -out=tfplan -detailed-exitcode
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 'Terraform show'
+        id: show
+        run: echo "plandiff='$(terraform show tfplan | sed $'s/\\[[^m]*m//g; s/[^[:print:]\t]//g')'" >> "$GITHUB_OUTPUT"
+        working-directory: ${{ env.WORKING_DIR }}
+
+      - name: 'Create issue with drift details'
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ env.GH_TOKEN }}
+          approvers: 'erikbjo'
+          minimum-approvals: 1
+          issue-title: "Drift detected on ${{ github.env.WORKSPACE }}, see body for details"
+          issue-body: ${{ steps.show.outputs.plandiff }}
+          exclude-workflow-initiator-as-approver: false
