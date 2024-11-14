@@ -60,7 +60,7 @@ jobs:
           minimum-approvals: 1
           issue-title: "Drift detected on ${{ github.env.WORKSPACE }}, see body for details"
           issue-body: |
-            "´´´text
+            ```text
             ${{ env.plandiff_content }}
-            ´´´
+            ```
           exclude-workflow-initiator-as-approver: false
