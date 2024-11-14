@@ -1,0 +1,47 @@
+name: 'Terraform setup'
+description: 'Setup Terraform with Azure credentials'
+author: 'https://github.com/erikbjo'
+
+inputs:
+  AZURE_CREDENTIALS:
+    description: 'Azure credentials'
+    required: true
+
+  WORKSPACE:
+    description: 'Terraform workspace'
+    required: true
+
+  WORKING_DIR:
+    description: 'Working directory'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: 'JSON to env'
+      id: parse
+      shell: bash
+      env:
+        AZJSON: ${{ inputs.AZURE_CREDENTIALS }}
+      run: |
+        ARM_CLIENT_ID=$(echo $AZJSON | jq -r '.["clientId"]')
+        ARM_CLIENT_SECRET=$(echo $AZJSON | jq -r '.["clientSecret"]')
+        ARM_TENANT_ID=$(echo $AZJSON | jq -r '.["tenantId"]')
+        ARM_SUBSCRIPTION_ID=$(echo $AZJSON | jq -r '.["subscriptionId"]')
+        echo ARM_CLIENT_ID=$ARM_CLIENT_ID >> $GITHUB_ENV
+        echo ARM_CLIENT_SECRET=$ARM_CLIENT_SECRET >> $GITHUB_ENV
+        echo ARM_TENANT_ID=$ARM_TENANT_ID >> $GITHUB_ENV
+        echo ARM_SUBSCRIPTION_ID=$ARM_SUBSCRIPTION_ID >> $GITHUB_ENV
+
+    - name: 'Terraform init'
+      shell: bash
+      id: init
+      working-directory: ${{ inputs.WORKING_DIR }}
+      run: terraform init -upgrade
+
+    - name: 'Setup Terraform Workspace'
+      shell: bash
+      id: setup_tf_ws
+      working-directory: ${{ inputs.WORKING_DIR }}
+      run: |
+        terraform workspace new ${{ inputs.WORKSPACE }} || terraform workspace select ${{ inputs.WORKSPACE }}
